@@ -1,0 +1,25 @@
+//{{NO_DEPENDENCIES}}
+// Microsoft Visual C++ generated include file.
+// Used by AMOSLink.rc
+//
+#define IDP_SOCKETS_INIT_FAILED         101
+#define IDD_VIDEOCAP_WINDOW             129
+#define IDC_VIDEOCAP_THRESHOLD_SLIDER   1017
+#define IDC_VIDEOCAP_THRESHOLD_VAL      1018
+#define IDC_VIDEOCAP_CAPTUREWINDOW      1019
+#define IDC_VIDEOCAP_ALGORITHM          1020
+#define IDC_VIDEOCAP_FEATUREDETECTION_LABEL 1021
+#define IDC_VIDEOCAP_FEATUREDETECTION_LABEL2 1022
+#define IDC_VIDEOCAP_THRESHOLD_SLIDER2  1023
+#define IDC_VIDEOCAP_THRESHOLD_VAL2     1024
+
+// Next default values for new objects
+// 
+#ifdef APSTUDIO_INVOKED
+#ifndef APSTUDIO_READONLY_SYMBOLS
+#define _APS_NEXT_RESOURCE_VALUE        1002
+#define _APS_NEXT_COMMAND_VALUE         32771
+#define _APS_NEXT_CONTROL_VALUE         1000
+#define _APS_NEXT_SYMED_VALUE           1000
+#endif
+#endif
