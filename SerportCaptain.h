@@ -33,6 +33,7 @@ public:
 	static int GetAvailableSerports(int *serportNums);//find available serial ports
 
 	//functions
+	int DeleteFiles(char *szFileNames, int nFilenamesSize, int nFileType);//delete one or more files of a certain type
 	int GetBytesDownloaded();//get number of bytes of remote AMOS file that have been downloaded so far
 	int GetBytesToDownload();//get number of bytes of remote AMOS file that is being downloaded
 	int RefreshSettings(int nSettingsType);//send instruction to AMOS to refresh a particular settings type based on the current contents of the prefs.txt file

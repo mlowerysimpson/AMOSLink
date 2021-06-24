@@ -25,6 +25,7 @@ Captain::Captain(CString sRootFolder)
 	m_sRemoteRemoteImageFilesAvailable = "";
 	m_sRemoteLogsAvailable = "";
 	m_sGPSData = "";
+	m_sUnDeletedFiles = "";
 	m_currentPropState.fRudderAngle=0;
 	m_currentPropState.fPropSpeed=0;
 	m_bLeakDetected=false;
@@ -33,6 +34,8 @@ Captain::Captain(CString sRootFolder)
 	m_dLatitude=0.0;
 	m_dLongitude=0.0;
 	m_fWaterTemp=0;
+	m_fConductivity = 0;
+	m_fDO2 = 0;
 	m_fBatteryVoltage=0;
 	m_fWirelessRXPower=0;
 	m_fPH=0;
@@ -230,6 +233,20 @@ bool Captain::ProcessBoatData(BOAT_DATA *pBoatData) {//process data from boat, r
 		m_fWaterTemp = Util::BytesToFloat(pBoatData->dataBytes);
 		return true;
 	}
+	else if (pBoatData->nPacketType == CONDUCTIVITY_DATA_PACKET) {
+		if (pBoatData->nDataSize != sizeof(float)) {
+			return false;
+		}
+		m_fConductivity = Util::BytesToFloat(pBoatData->dataBytes);
+		return true;
+	}
+	else if (pBoatData->nPacketType == DO2_DATA_PACKET) {
+		if (pBoatData->nDataSize != sizeof(float)) {
+			return false;
+		}
+		m_fDO2 = Util::BytesToFloat(pBoatData->dataBytes);
+		return true;
+	}
 	else if (pBoatData->nPacketType==WATER_PH_DATA_PACKET) {
 		if (pBoatData->nDataSize!=sizeof(float)) {
 			return false;
@@ -285,6 +302,13 @@ bool Captain::ProcessBoatData(BOAT_DATA *pBoatData) {//process data from boat, r
 		m_nTotalNumberScriptSteps = Util::BytesToInt(&pBoatData->dataBytes[REMOTE_SCRIPT_NAMELENGTH+sizeof(int)]);
 		return true;
 	}
+	else if (pBoatData->nPacketType == DELETE_FILES) {
+		if (pBoatData->nDataSize != (sizeof(int) + 1))
+		{
+			return false;
+		}
+		return true;
+	}
 	return false;
 }
 
@@ -310,7 +334,7 @@ CString Captain::FormatWaterTemp() {//format the current water temperature data 
 	szDegSymbol[0] = (char)176;
 	szDegSymbol[1] = 0;
 	CString sWaterTemp="";
-	sWaterTemp.Format("Water Temp = %.1f %sC",this->m_fWaterTemp,szDegSymbol);
+	sWaterTemp.Format("Water Temp = %.3f %sC",this->m_fWaterTemp,szDegSymbol);
 	return sWaterTemp;
 }
 
@@ -405,4 +429,106 @@ CString Captain::FormatRemoteScriptStatus() {//format the status of the script c
 		sRemoteScriptStatus.Format("%s, %d of %d", m_sRemoteScriptName, m_nRemoteScriptStepIndex + 1, m_nTotalNumberScriptSteps);
 	}
 	return sRemoteScriptStatus;
+}
+
+bool Captain::isGraphableSensorType(int nSensorType) {//returns true if nSensorType can be shown in a graph or on a map
+	if (nSensorType == WATER_TEMP_DATA) {
+		return true;
+	}
+	else if (nSensorType == PH_DATA) {
+		return true;
+	}
+	else if (nSensorType == WATER_TURBIDITY) {
+		return true;
+	}
+	else if (nSensorType == DIAGNOSTICS_DATA) {
+		return true;
+	}
+	else if (nSensorType == DO2_DATA) {
+		return true;
+	}
+	else if (nSensorType == CONDUCTIVITY_DATA) {
+		return true;
+	}
+	return false;
+}
+
+int Captain::GetSensorPacketType(int nSensorType) {//returns the packet data type associated with a particular sensor type
+	if (nSensorType == WATER_TEMP_DATA) {
+		return WATER_TEMP_DATA_PACKET;
+	}
+	else if (nSensorType == PH_DATA) {
+		return WATER_PH_DATA_PACKET;
+	}
+	else if (nSensorType == WATER_TURBIDITY) {
+		return WATER_TURBIDITY_DATA_PACKET;
+	}
+	else if (nSensorType == DIAGNOSTICS_DATA) {
+		return DIAGNOSTICS_DATA_PACKET;
+	}
+	else if (nSensorType == DO2_DATA) {
+		return DO2_DATA_PACKET;
+	}
+	else if (nSensorType == CONDUCTIVITY_DATA) {
+		return CONDUCTIVITY_DATA_PACKET;
+	}
+	return 0;//unknown sensor type
+}
+
+CString Captain::GetSensorTypeStr(int nSensorType) {//returns the name of a particular sensor type
+	CString sRetval = "";
+	if (nSensorType == WATER_TEMP_DATA) {
+		sRetval = "Temperature Sensor";
+	}
+	else if (nSensorType == PH_DATA) {
+		sRetval = "pH Sensor";
+	}
+	else if (nSensorType == WATER_TURBIDITY) {
+		sRetval = "Turbidity Sensor";
+	}
+	else if (nSensorType == DIAGNOSTICS_DATA) {
+		sRetval = "Diagnostics";
+	}
+	else if (nSensorType == DO2_DATA) {
+		sRetval = "Dissolved Oxygen Sensor";
+	}
+	else if (nSensorType == CONDUCTIVITY_DATA) {
+		sRetval = "Conductivity Sensor";
+	}
+	return sRetval;//unknown sensor type
+}
+
+CString Captain::FormatSensorVal(int nSensorType) {//format the received sensor data for a particular sensor type
+	CString sRetval = "";
+	if (nSensorType == WATER_TEMP_DATA) {
+		sRetval = FormatWaterTemp();
+	}
+	else if (nSensorType == PH_DATA) {
+		sRetval = FormatWaterPH();
+	}
+	else if (nSensorType == WATER_TURBIDITY) {
+		sRetval = FormatWaterTurbidity();
+	}
+	else if (nSensorType == DIAGNOSTICS_DATA) {
+		sRetval = FormatDiagnosticsData();
+	}
+	else if (nSensorType == DO2_DATA) {
+		sRetval = FormatWaterDO2();
+	}
+	else if (nSensorType == CONDUCTIVITY_DATA) {
+		sRetval = FormatWaterConductivity();
+	}
+	return sRetval;//unknown sensor type
+}
+
+CString Captain::FormatWaterDO2() {//format the current water dissolved O2 conc as a string, ex: DO2 = 9.1 mg/L
+	CString sWaterDO2 = "";
+	sWaterDO2.Format("DO2 = %.2f", this->m_fDO2);
+	return sWaterDO2;
+}
+
+CString Captain::FormatWaterConductivity() {//format the current water conductivity as a string, ex: Conductivity = 1.003 mS / cm
+	CString sConductivity = "";
+	sConductivity.Format("Conductivity = %.3f", this->m_fConductivity);
+	return sConductivity;
 }

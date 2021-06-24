@@ -21,6 +21,7 @@ public:
 	~NetworkCaptain(void);
 
 	//functions
+	int DeleteFiles(char* szFileNames, int nFilenamesSize, int nFileType);
 	int SendRTKData(unsigned char* rtkBuf, int nRTKBufSize); //send RTK correction data to AMOS(used for making differential GPS measurements, i.e.getting improved accuracyand precision)
 	int RefreshSettings(int nSettingsType);//send instruction to AMOS to refresh a particular settings type based on the current contents of the prefs.txt file
 	int ReceiveFile(char* remoteFilename, char* destPath);//receive a remote file on AMOS

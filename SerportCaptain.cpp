@@ -7,6 +7,13 @@
 SerportCaptain* g_sc = NULL;//global SerportCaptain object that gets created by calling program
 
 extern "C" {
+	__declspec (dllexport) int Serport_DeleteFiles(char* szFileNames, int nFilenamesSize, int nFileType) {
+		if (!g_sc) {//must not be connected yet
+			return ERROR_NOTCONNECTED;
+		}
+		return g_sc->DeleteFiles(szFileNames, nFilenamesSize, nFileType);
+	}
+
 	__declspec (dllexport) int TestSerportConnection(int nCOMPort, LPCTSTR sRootFolder) {
 		//check to see if AMOS is available and can communicate over wireless serial link
 		CString rootFolder = CString(sRootFolder);
@@ -780,8 +787,19 @@ bool SerportCaptain::ReceiveBoatData() {//receive data from boat over network
 		int nNumBytes = 0;
 		memcpy(&nNumBytes, pBoatData->dataBytes, sizeof(int));
 		//make sure number of bytes is not too large
-		if (nNumBytes < 4096) {
+		if (nNumBytes < 200000) {
 			bool bRetval = DownloadBytes(nNumBytes, LIST_REMOTE_SCRIPTS);
+			delete[]inBuf;
+			return bRetval;
+		}
+	}
+	else if (pBoatData->nPacketType == LIST_REMOTE_IMAGE) {
+		bSkipProcessData = true;
+		int nNumBytes = 0;
+		memcpy(&nNumBytes, pBoatData->dataBytes, sizeof(int));
+		//make sure number of bytes is not too large
+		if (nNumBytes < 200000) {
+			bool bRetval = DownloadBytes(nNumBytes, LIST_REMOTE_IMAGE);
 			delete[]inBuf;
 			return bRetval;
 		}
@@ -791,7 +809,7 @@ bool SerportCaptain::ReceiveBoatData() {//receive data from boat over network
 		int nNumBytes = 0;
 		memcpy(&nNumBytes, pBoatData->dataBytes, sizeof(int));
 		//make sure number of bytes is not too large
-		if (nNumBytes < 4096) {
+		if (nNumBytes < 200000) {
 			bool bRetval = DownloadBytes(nNumBytes, LIST_REMOTE_DATA);
 			delete[]inBuf;
 			return bRetval;
@@ -802,7 +820,7 @@ bool SerportCaptain::ReceiveBoatData() {//receive data from boat over network
 		int nNumBytes = 0;
 		memcpy(&nNumBytes, pBoatData->dataBytes, sizeof(int));
 		//make sure number of bytes is not too large
-		if (nNumBytes < 4096) {
+		if (nNumBytes < 20000) {
 			bool bRetval = DownloadBytes(nNumBytes, LIST_REMOTE_LOG);
 			delete[]inBuf;
 			return bRetval;
@@ -817,6 +835,22 @@ bool SerportCaptain::ReceiveBoatData() {//receive data from boat over network
 			bool bRetval = DownloadBytes(nNumBytes, FILE_RECEIVE);
 			delete[]inBuf;
 			return bRetval;
+		}
+	}
+	else if (pBoatData->nPacketType == DELETE_FILES) {
+		bSkipProcessData = true;
+		int nNumBytes = 0;
+		memcpy(&nNumBytes, pBoatData->dataBytes, sizeof(int));
+		//make sure number of bytes is not too large
+		if (nNumBytes>0&&nNumBytes < 20000) {
+			bool bRetval = DownloadBytes(nNumBytes, DELETE_FILES);
+			delete[]inBuf;
+			return bRetval;
+		}
+		else {
+			m_sUnDeletedFiles = "";
+			delete[]inBuf;
+			return true;
 		}
 	}
 	delete []inBuf;
@@ -917,67 +951,24 @@ bool SerportCaptain::RequestSensorData(CString &sSensorData) {
 		return false;
 	}
 	for (int i=0;i<this->m_nNumSensorsAvailable;i++) {
-		if (this->m_sensorTypes[i]==WATER_TEMP_DATA) {
-			CString sWaterTemp="";
+		if (Captain::isGraphableSensorType(m_sensorTypes[i])) {
+			CString sVal = "";
 			REMOTE_COMMAND rc;
-			rc.nCommand = WATER_TEMP_DATA_PACKET;
+			rc.nCommand = Captain::GetSensorPacketType(m_sensorTypes[i]);
 			rc.nNumDataBytes = 0;
 			rc.pDataBytes = NULL;
 			if (SendSerialCommand(&rc)) {
 				//test
-				TRACE("try to receive sensor data...\n");
+				TRACE("try to receive %s data...\n", Captain::GetSensorTypeStr(m_sensorTypes[i]));
 				//end test
 				if (ReceiveBoatData()) {
 					bGotSomeData = true;
 				}
-				sWaterTemp = FormatWaterTemp();//format the received water temperature data
-				sSensorData+=(sWaterTemp+", ");
+				sVal = FormatSensorVal(m_sensorTypes[i]);//format the received sensor data value
+				sSensorData += (sVal + ", ");
 			}
 			else {
-				sL.Unlock();
-				return false;
-			}
-		}
-		else if (this->m_sensorTypes[i]==PH_DATA) {
-			CString sWaterPH="";
-			REMOTE_COMMAND rc;
-			rc.nCommand = WATER_PH_DATA_PACKET;
-			rc.nNumDataBytes = 0;
-			rc.pDataBytes = NULL;
-			if (SendSerialCommand(&rc)) {
-				//test
-				TRACE("try to receive ph data...\n");
-				//end test
-				if (ReceiveBoatData()) {
-					bGotSomeData = true;
-				}
-				sWaterPH = FormatWaterPH();//format the received water temperature data
-				sSensorData+=(sWaterPH+", ");
-			}
-			else {
-				sL.Unlock();
-				return false;
-			}
-		}
-		else if (this->m_sensorTypes[i]==WATER_TURBIDITY) {
-			CString sWaterTurbidity="";
-			REMOTE_COMMAND rc;
-			rc.nCommand = WATER_TURBIDITY_DATA_PACKET;
-			rc.nNumDataBytes = 0;
-			rc.pDataBytes = NULL;
-			if (SendSerialCommand(&rc)) {
-				//test
-				TRACE("try to receive turbidity data...\n");
-				//end test
-				if (ReceiveBoatData()) {
-					bGotSomeData = true;
-				}
-				sWaterTurbidity = FormatWaterTurbidity();//format the received water temperature data
-				sSensorData+=(sWaterTurbidity+", ");
-			}
-			else {
-				sL.Unlock();
-				return false;
+				continue;
 			}
 		}
 	}
@@ -1424,9 +1415,6 @@ int SerportCaptain::RemoteScriptStepChange(int nStepChange) {//send command to c
  * @return 0 if the command was executed successfully, or negative if an error occurred.
  */
 int SerportCaptain::GetRemoteFiles(char* remoteFiles, int nBufSize, int nFileType) {//get the names of remote files on AMOS of a particular file type
-	if (nFileType!= REMOTE_SCRIPT_FILES&&nFileType!=REMOTE_DATA_FILES&&nFileType!=REMOTE_LOG_FILES) {//the only file types supported for now
-		return -1;
-	}
 	REMOTE_COMMAND rc;
 	rc.nCommand = LIST_REMOTE_SCRIPTS;
 	if (nFileType == REMOTE_DATA_FILES) {
@@ -1434,6 +1422,9 @@ int SerportCaptain::GetRemoteFiles(char* remoteFiles, int nBufSize, int nFileTyp
 	}
 	else if (nFileType == REMOTE_LOG_FILES) {
 		rc.nCommand = LIST_REMOTE_LOG;
+	}
+	else if (nFileType == REMOTE_IMAGE_FILES) {
+		rc.nCommand = LIST_REMOTE_IMAGE;
 	}
 	rc.nNumDataBytes = 0;
 	rc.pDataBytes = NULL;
@@ -1499,6 +1490,19 @@ bool SerportCaptain::DownloadBytes(int nNumBytes, int nDataType) {//download a l
 		}
 		delete[]fileNameBytes;
 	}
+	else if (nDataType == LIST_REMOTE_IMAGE) {
+		char* fileNameBytes = new char[nNumBytes + 1];
+		int nNumReceived = ReceiveLargeDataChunk(fileNameBytes, nNumBytes);
+		if (nNumReceived == nNumBytes) {//bytes received successfully, save to m_sRemoteDataAvailable
+			fileNameBytes[nNumReceived] = 0;//null terminate
+			m_sRemoteRemoteImageFilesAvailable = CString(fileNameBytes);
+			bRetval = true;
+		}
+		else {
+			m_sRemoteRemoteImageFilesAvailable = "";
+		}
+		delete[]fileNameBytes;
+	}
 	else if (nDataType == LIST_REMOTE_LOG) {
 		char* fileNameBytes = new char[nNumBytes + 1];
 		int nNumReceived = ReceiveLargeDataChunk(fileNameBytes, nNumBytes);
@@ -1533,6 +1537,22 @@ bool SerportCaptain::DownloadBytes(int nNumBytes, int nDataType) {//download a l
 			}
 		}
 		delete [] fileBytes;
+	}
+	else if (nDataType == DELETE_FILES) {//receiving a list of files from AMOS of files that could not be deleted 
+		if (nNumBytes == 0) {
+			m_sUnDeletedFiles = "";
+			bRetval = true;
+		}
+		else {
+			char* fileNameBytes = new char[nNumBytes + 1];
+			int nNumReceived = ReceiveLargeDataChunk(fileNameBytes, nNumBytes);
+			if (nNumReceived == nNumBytes) {//bytes received successfully, save to m_sU
+				fileNameBytes[nNumReceived] = 0;//null terminate
+				m_sRemoteDataAvailable = CString(fileNameBytes);
+				bRetval = true;
+			}
+			delete[] fileNameBytes;
+		}
 	}
 	return bRetval;
 }
@@ -1737,4 +1757,46 @@ int SerportCaptain::GetBytesDownloaded() {//get number of bytes of remote AMOS f
 		sscanf(m_bytesDownloaded, "%d", &nBytesDownloaded);
 	}
 	return nBytesDownloaded;
+}
+
+int SerportCaptain::DeleteFiles(char* szFileNames, int nFilenamesSize, int nFileType) {//delete one or more files of a certain type
+	//szFileNames = list of filenames to delete, each filename separated by a "\n" character
+	//nFilenamesSize = the size of the szFileNames buffer
+	//nFileType = one of REMOTE_DATA_FILES, REMOTE_LOG_FILES, or REMOTE_IMAGE_FILES
+	REMOTE_COMMAND rc;
+	rc.nCommand = DELETE_FILES;
+	rc.nNumDataBytes = 5;
+	rc.pDataBytes = new unsigned char[5];
+	unsigned char dataSizeBytes[4];
+	dataSizeBytes[0] = (unsigned char)((nFilenamesSize & 0xff000000) >> 24);
+	dataSizeBytes[1] = (unsigned char)((nFilenamesSize & 0x00ff0000) >> 16);
+	dataSizeBytes[2] = (unsigned char)((nFilenamesSize & 0x0000ff00) >> 8);
+	dataSizeBytes[3] = (unsigned char)(nFilenamesSize & 0x000000ff);
+	memcpy(rc.pDataBytes, dataSizeBytes, 4);//send info pertaining to the size of the next block of data to come
+	rc.pDataBytes[4] = (unsigned char)nFileType;
+
+	CSingleLock sL(&this->m_sendMutex);
+	if (!sL.Lock(1000)) {
+		delete[]rc.pDataBytes;
+		return -4;
+	}
+	int nRetval = 0;
+	if (!SendSerialCommand(&rc)) {
+		nRetval = -5;
+	}
+	else {
+		//now send a larger block of data that corresponds to the filenames to be deleted
+		if (!BoatCommand::SendLargeSerialData((int)m_hPort, (unsigned char *)szFileNames, nFilenamesSize, NULL)) {//send large amount of data out serial port, need to get confirmation after sending each chunk
+			nRetval = -7;
+		}
+	}
+	delete[]rc.pDataBytes;
+	m_sUnDeletedFiles = "";
+	if (ReceiveBoatData()) {
+		nRetval = 1;
+		//copy over any filenames that could not be deleted
+		strcpy(szFileNames, m_sUnDeletedFiles.GetBuffer(m_sUnDeletedFiles.GetLength()));
+	}
+	sL.Unlock();
+	return nRetval;
 }

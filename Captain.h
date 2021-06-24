@@ -51,6 +51,10 @@ public:
 	
 protected:
 	//functions
+	CString FormatSensorVal(int nSensorType);//format the received sensor data for a particular sensor type
+	static CString GetSensorTypeStr(int nSensorType);//returns the name of a particular sensor type
+	static int GetSensorPacketType(int nSensorType);//returns the packet data type associated with a particular sensor type
+	static bool isGraphableSensorType(int nSensorType);//returns true if nSensorType can be shown in a graph or on a map
 	bool Stop(PROPELLER_STATE *pPropState);//stop thrusters, set speed of both to zero
 	bool ForwardHo(PROPELLER_STATE *pPropState);//move forward, increase forward speed (up to limit)
 	bool StarboardHo(PROPELLER_STATE *propState);//move to right, increase right turning speed (up to limit)
@@ -65,6 +69,8 @@ protected:
 	CString FormatWaterTemp();//format the current water temperature data as a string, ex: Water temp = 23.2�
 	CString FormatWaterPH();//format the current water pH data as a string, ex: pH = 7.8�
 	CString FormatWaterTurbidity();//format the current water turbidity as a string, ex: Turbidity = 0.087
+	CString FormatWaterDO2();//format the current water dissolved O2 conc as a string, ex: DO2 = 9.1 mg/L
+	CString FormatWaterConductivity();//format the current water conductivity as a string, ex: Conductivity = 1.003 mS / cm
 	CString FormatVoltage();//format the available voltage
 	CString FormatLeakData();//format the received leak sensor data
 	CString FormatDiagnosticsData();//format the received diagnostics data
@@ -81,6 +87,8 @@ protected:
 	float m_fWirelessRXPower;//the power level measured by the remote wireless receiver
 	float m_fWaterTemp;//the last known water temperature measured by the boat
 	float m_fPH;//the last known water pH value measured by the boat
+	float m_fDO2;//the last known water dissolved oxygen value measured by the boat
+	float m_fConductivity;//the last known water conductivity value measured by the boat
 	float m_fWaterTurbidity;//the last known water turbidity measured by the boat
 	float m_fHumidityCPU;//the humidity inside the CPU enclosure of AMOS
 	float m_fHumidityTempCPU;//the temperature as measured by the humidity sensor in the CPU enclosure of AMOS
@@ -99,6 +107,7 @@ protected:
 	IMU_DATASAMPLE m_compassData;//the last known compass data from the boat
 	int m_nNumSensorsAvailable;//the total number of sensors that the boat has available
 	int *m_sensorTypes;//the types of sensors that the boat has available, see SensorDataFile.h for a list of the supported sensor types
+	CString m_sUnDeletedFiles;//filenames on AMOS that could not be deleted (in response to a "delete files' command
 
 
 private:

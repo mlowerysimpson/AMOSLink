@@ -5,6 +5,13 @@
 NetworkCaptain* g_nc = NULL; //global NetworkCaptain object that gets created by calling program
 
 extern "C" {
+	__declspec (dllexport) int Network_DeleteFiles(char* szFileNames, int nFilenamesSize, int nFileType) {
+		if (!g_nc) {//must not be connected yet
+			return ERROR_NOTCONNECTED;
+		}
+		return g_nc->DeleteFiles(szFileNames, nFilenamesSize, nFileType);
+	}
+
 	__declspec (dllexport) int TestNetworkConnection(LPCTSTR sIPAddr, int nNetworkPortNumber, LPCTSTR sRootFolder) {
 		//check to see if AMOS is available and can communicate over wireless serial link
 		CString ipaddr = CString(sIPAddr);
@@ -23,6 +30,14 @@ extern "C" {
 			g_nc = NULL;
 		}
 		return nWinsockError;
+	}
+
+	__declspec (dllexport) int Network_RefreshSettings(int nSettingsType) {
+		if (!g_nc) {
+			//not connected yet
+			return ERROR_NOTCONNECTED;
+		}
+		return g_nc->RefreshSettings(nSettingsType);
 	}
 
 	__declspec (dllexport) int Network_StopRemoteProgram() {
@@ -629,6 +644,17 @@ bool NetworkCaptain::ReceiveBoatData() {//receive data from boat over network
 			return bRetval;
 		}
 	}
+	else if (pBoatData->nPacketType == DELETE_FILES) {
+		bSkipProcessData = true;
+		int nNumUndeleted = 0;
+		memcpy(&nNumUndeleted, pBoatData->dataBytes, sizeof(int));
+		//make sure # of bytes is not too large
+		if (nNumUndeleted > 0 && nNumUndeleted < 2000000) {
+			bool bRetval = DownloadBytes(m_connectedSock, nNumUndeleted, DELETE_FILES);
+			delete[]inBuf;
+			return bRetval;
+		}
+	}
 	delete []inBuf;
 	if (!bSkipProcessData&&!ProcessBoatData(pBoatData)) {
 		return false;
@@ -676,10 +702,10 @@ bool NetworkCaptain::FindSupportedSensors() {//query supported data (i.e. find o
 bool NetworkCaptain::RequestSensorData(CString &sSensorData) {//query the boat for any sensor data that it might have (eg: water temperature, pH, turbidity, etc.)
 	sSensorData="";
 	for (int i=0;i<this->m_nNumSensorsAvailable;i++) {
-		if (this->m_sensorTypes[i]==WATER_TEMP_DATA) {
-			CString sWaterTemp="";
+		if (Captain::isGraphableSensorType(m_sensorTypes[i])) {
+			CString sVal = "";
 			REMOTE_COMMAND rc;
-			rc.nCommand = WATER_TEMP_DATA_PACKET;
+			rc.nCommand = Captain::GetSensorPacketType(m_sensorTypes[i]);
 			rc.nNumDataBytes = 0;
 			rc.pDataBytes = NULL;
 			if (SendNetworkCommand(&rc)) {
@@ -690,47 +716,11 @@ bool NetworkCaptain::RequestSensorData(CString &sSensorData) {//query the boat f
 			else {
 				return false;
 			}
-			sWaterTemp = FormatWaterTemp();//format the received water temperature data
-			sSensorData+=(sWaterTemp+", ");
-		}
-		else if (this->m_sensorTypes[i]==PH_DATA) {
-			CString sWaterPH="";
-			REMOTE_COMMAND rc;
-			rc.nCommand = WATER_PH_DATA_PACKET;
-			rc.nNumDataBytes = 0;
-			rc.pDataBytes = NULL;
-			if (SendNetworkCommand(&rc)) {
-				if (!ReceiveBoatData()) {
-					return false;
-				}
-			}
-			else {
-				return false;
-			}
-			sWaterPH = FormatWaterPH();//format the received water temperature data
-			sSensorData+=(sWaterPH+", ");
-		}
-		else if (this->m_sensorTypes[i]==WATER_TURBIDITY) {
-			CString sWaterTurbidity="";
-			REMOTE_COMMAND rc;
-			rc.nCommand = WATER_TURBIDITY_DATA_PACKET;
-			rc.nNumDataBytes = 0;
-			rc.pDataBytes = NULL;
-			if (SendNetworkCommand(&rc)) {
-				if (!ReceiveBoatData()) {
-					return false;
-				}
-			}
-			else {
-				return false;
-			}
-			sWaterTurbidity = FormatWaterTurbidity();//format the received water temperature data
-			sSensorData+=(sWaterTurbidity+", ");
+			sVal = FormatSensorVal(m_sensorTypes[i]);//format the received sensor data value
+			sSensorData += (sVal + ", ");
 		}
 	}
-	CString sDiagData = FormatDiagnosticsData();//format the received diagnostics data
-	sSensorData+=(sDiagData+", ");
-
+	
 	int nSensorDataLength = sSensorData.GetLength();
 	if (nSensorDataLength>0) {//get rid of trailing comma
 		sSensorData = sSensorData.Left(nSensorDataLength-2);
@@ -1033,6 +1023,17 @@ bool NetworkCaptain::DownloadBytes(SOCKET sock, int nNumBytes, int nDataType) {/
 		}
 		delete[] fileBytes;
 	}
+	else if (nDataType == DELETE_FILES)
+	{
+		m_sUnDeletedFiles = "";
+		unsigned char* fileBytes = new unsigned char[nNumBytes + 1];
+		int nNumReceived = ReceiveLargeDataChunk(sock, (char*)fileBytes, nNumBytes);
+		if (nNumReceived == nNumBytes) {//bytes received successfully
+			fileBytes[nNumBytes] = 0;//null terminate
+			m_sUnDeletedFiles = CString((char*)fileBytes);
+		}
+		delete[] fileBytes;
+	}
 	return bRetval;
 }
 
@@ -1185,5 +1186,40 @@ int NetworkCaptain::SendRTKData(unsigned char* rtkBuf, int nRTKBufSize) {
 		nRetval = -1;
 	}
 	delete[]rc.pDataBytes;
+	return nRetval;
+}
+
+int NetworkCaptain::DeleteFiles(char* szFileNames, int nFilenamesSize, int nFileType) {//delete one or more files of a certain type
+	//szFileNames = list of filenames to delete, each filename separated by a "\n" character
+	//nFilenamesSize = the size of the szFileNames buffer
+	//nFileType = one of REMOTE_DATA_FILES, REMOTE_LOG_FILES, or REMOTE_IMAGE_FILES
+	REMOTE_COMMAND rc;
+	rc.nCommand = DELETE_FILES;
+	rc.nNumDataBytes = 5;
+	rc.pDataBytes = new unsigned char[5];
+	unsigned char dataSizeBytes[4];
+	dataSizeBytes[0] = (unsigned char)((nFilenamesSize & 0xff000000) >> 24);
+	dataSizeBytes[1] = (unsigned char)((nFilenamesSize & 0x00ff0000) >> 16);
+	dataSizeBytes[2] = (unsigned char)((nFilenamesSize & 0x0000ff00) >> 8);
+	dataSizeBytes[3] = (unsigned char)(nFilenamesSize & 0x000000ff);
+	memcpy(rc.pDataBytes, dataSizeBytes, 4);//send info pertaining to the size of the next block of data to come
+	rc.pDataBytes[4] = (unsigned char)nFileType;
+	int nRetval = 0;
+	if (!SendNetworkCommand(&rc)) {
+		nRetval = -5;
+	}
+	else {
+		//now send a larger block of data that corresponds to the filenames to be deleted
+		if (send(m_connectedSock, szFileNames, nFilenamesSize, NULL) != nFilenamesSize) {//send large amount of data over network connection
+			nRetval = -7;
+		}
+	}
+	delete[]rc.pDataBytes;
+	m_sUnDeletedFiles = "";
+	if (nRetval>=0&&ReceiveBoatData()) {
+		nRetval = 1;
+		//copy over any filenames that could not be deleted
+		strcpy(szFileNames, m_sUnDeletedFiles.GetBuffer(m_sUnDeletedFiles.GetLength()));
+	}
 	return nRetval;
 }
